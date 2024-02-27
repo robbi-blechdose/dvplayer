@@ -18,6 +18,8 @@
  */
 
 #include <libiec61883/iec61883.h>
+#include <ncurses.h>
+
 #include <stdio.h>
 #include <sys/poll.h>
 #include <signal.h>
@@ -26,20 +28,43 @@
 
 #include <stdbool.h>
 
-static int g_done = 0;
+#define PACKET_SIZE 480
 
-static int read_frame(unsigned char *data, int n, unsigned int dropped, void *callback_data)
+static bool interrupted = false;
+
+static bool isPaused = false;
+
+static int currentDIFBlocks = 0;
+static int currentFrame = 0;
+
+//TODO: this is not reading a full frame, but likely 6 DIF blocks
+static int readFrame(unsigned char *data, int n, unsigned int dropped, void *callback_data)
 {
     FILE *f = (FILE*) callback_data;
 
     if(n == 1)
     {
-        if(fread(data, 480, 1, f) < 1)
+        if(fread(data, PACKET_SIZE, 1, f) < 1)
         {
             return -1;
         }
         else
         {
+            currentDIFBlocks++;
+            if(currentDIFBlocks == 150 * 2)
+            {
+                currentDIFBlocks = 0;
+
+                if(isPaused)
+                {
+                    //This will read the same bit over and over, thus "pausing" the video
+                    fseek(f, -150 * 2 * PACKET_SIZE, SEEK_CUR);
+                }
+                else
+                {
+                    currentFrame++;
+                }
+            }
             return 0;
         }
     }
@@ -51,45 +76,59 @@ static int read_frame(unsigned char *data, int n, unsigned int dropped, void *ca
 
 static void sighandler(int sig)
 {
-    g_done = 1;
+    interrupted = true;
 }
 
 static void dv_transmit(raw1394handle_t handle, FILE *f, int channel)
 {	
-    unsigned char data[480];
-    fread(data, 480, 1, f);
+    unsigned char data[PACKET_SIZE];
+    fread(data, PACKET_SIZE, 1, f);
 
     int isPAL = (data[3] & 0x80) != 0;
 
-    iec61883_dv_t dv = iec61883_dv_xmit_init(handle, isPAL, read_frame, (void *)f);
-    
-    if(dv && iec61883_dv_xmit_start(dv, channel) == 0)
+    iec61883_dv_t dv = iec61883_dv_xmit_init(handle, isPAL, readFrame, (void *)f);
+    if(dv == NULL)
     {
-        struct pollfd pfd = {
-            fd: raw1394_get_fd(handle),
-            events: POLLIN,
-            revents: 0
-        };
-        int result = 0;
-        
-        signal(SIGINT, sighandler);
-        signal(SIGPIPE, sighandler);
-        fprintf(stderr, "Starting to transmit %s.\n", isPAL ? "PAL" : "NTSC");
-
-        do
-        {
-            int r = 0;
-            if((r = poll(&pfd, 1, 100)) > 0 && (pfd.revents & POLLIN))
-            {
-                result = raw1394_loop_iterate(handle);
-            }
-            
-        }
-        while(g_done == 0 && result == 0);
-        
-        fprintf(stderr, "Done.\n");
+        return;
     }
+
+    if(iec61883_dv_xmit_start(dv, channel) != 0)
+    {
+        iec61883_dv_close(dv);
+        return;
+    }
+    
+    struct pollfd pfd = {
+        fd: raw1394_get_fd(handle),
+        events: POLLIN,
+        revents: 0
+    };
+    
+    signal(SIGINT, sighandler);
+    signal(SIGPIPE, sighandler);
+    fprintf(stderr, "Starting to transmit %s.\n", isPAL ? "PAL" : "NTSC");
+
+    int result = 0;
+    do
+    {
+        int r = 0;
+        if((r = poll(&pfd, 1, 100)) > 0 && (pfd.revents & POLLIN))
+        {
+            result = raw1394_loop_iterate(handle);
+            char buffer[80];
+            sprintf(buffer, "Current frame: %5d Paused: %3s\r", currentFrame, isPaused ? "Yes" : "No");
+            mvaddstr(0, 0, buffer);
+            if(getch() == 'p')
+            {
+                isPaused = !isPaused;
+            }
+        }
+        
+    }
+    while(!interrupted && result == 0);
+    
     iec61883_dv_close(dv);
+    fprintf(stderr, "Done.\n");
 }
 
 const char* helpText = "usage: dvplayer [-t node-id] [- | file]\n"
@@ -141,6 +180,13 @@ int main(int argc, char* argv[])
     {
         inputFile = stdin;
     }
+
+    //Set up ncurses
+    initscr();
+    noecho();
+    curs_set(0);
+    keypad(stdscr, true);
+    timeout(0);
     
     if(nodeSpecified)
     {
@@ -161,6 +207,9 @@ int main(int argc, char* argv[])
     {
         dv_transmit(handle, inputFile, 63);
     }
+
+    //Quit ncurses
+    endwin();
 
     if(inputFile != stdin)
     {

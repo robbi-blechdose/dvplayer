@@ -1,7 +1,7 @@
 CC		= gcc
 
 CFLAGS	= -Wall -g
-LDFLAGS	= -liec61883 -lraw1394
+LDFLAGS	= -liec61883 -lraw1394 -lncurses
 
 PNAME	= dvplayer
 
