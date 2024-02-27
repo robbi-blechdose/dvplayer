@@ -30,6 +30,8 @@
 
 #define PACKET_SIZE 480
 
+const char* fileName = NULL;
+
 static bool interrupted = false;
 
 static bool isPaused = false;
@@ -37,10 +39,20 @@ static bool isPaused = false;
 static int currentDIFBlocks = 0;
 static int currentFrame = 0;
 
+//TODO: this currently causes artifacts since we're cutting off in the middle of a block
+void seekFrame(FILE* file, int diff)
+{
+    if(currentFrame + diff > 0)
+    {
+        currentFrame += diff;
+    }
+    fseek(file, diff * 150 * 2 * PACKET_SIZE, SEEK_CUR);
+}
+
 //TODO: this is not reading a full frame, but likely 6 DIF blocks
 static int readFrame(unsigned char *data, int n, unsigned int dropped, void *callback_data)
 {
-    FILE *f = (FILE*) callback_data;
+    FILE* f = (FILE*) callback_data;
 
     if(n == 1)
     {
@@ -57,8 +69,9 @@ static int readFrame(unsigned char *data, int n, unsigned int dropped, void *cal
 
                 if(isPaused)
                 {
+                    currentFrame++;
                     //This will read the same bit over and over, thus "pausing" the video
-                    fseek(f, -150 * 2 * PACKET_SIZE, SEEK_CUR);
+                    seekFrame(f, -1);
                 }
                 else
                 {
@@ -79,7 +92,19 @@ static void sighandler(int sig)
     interrupted = true;
 }
 
-static void dv_transmit(raw1394handle_t handle, FILE *f, int channel)
+void drawNcursesUI()
+{
+    char buffer[80];
+    box(stdscr, 0, 0);
+    mvaddstr(0, 8, "dvplayer");
+    sprintf(buffer, "File: %s", fileName == NULL ? "stdin" : fileName);
+    mvaddstr(1, 1, buffer);
+    sprintf(buffer, "Current frame: %5d Paused: %3s", currentFrame, isPaused ? "Yes" : "No");
+    mvaddstr(2, 1, buffer);
+    mvaddstr(8, 1, "P - Play/Pause   F - Forward 1s   R - Rewind 1s");
+}
+
+static void dv_transmit(raw1394handle_t handle, FILE* f, int channel)
 {	
     unsigned char data[PACKET_SIZE];
     fread(data, PACKET_SIZE, 1, f);
@@ -115,13 +140,22 @@ static void dv_transmit(raw1394handle_t handle, FILE *f, int channel)
         if((r = poll(&pfd, 1, 100)) > 0 && (pfd.revents & POLLIN))
         {
             result = raw1394_loop_iterate(handle);
-            char buffer[80];
-            sprintf(buffer, "Current frame: %5d Paused: %3s\r", currentFrame, isPaused ? "Yes" : "No");
-            mvaddstr(0, 0, buffer);
-            if(getch() == 'p')
+            //Handle input
+            char c = getch();
+            if(c == 'p')
             {
                 isPaused = !isPaused;
             }
+            else if(c == 'f')
+            {
+                seekFrame(f, 50);
+            }
+            else if(c == 'r')
+            {
+                seekFrame(f, -50);
+            }
+            //Draw UI
+            drawNcursesUI();
         }
         
     }
@@ -157,6 +191,7 @@ int main(int argc, char* argv[])
         else if(strcmp(argv[i], "-") != 0)
         {
             inputFile = fopen(argv[i], "rb");
+            fileName = argv[i];
         }
     }
 
