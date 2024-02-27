@@ -30,15 +30,6 @@
 
 static int g_done = 0;
 
-static int write_frame (unsigned char *data, int len, int complete, void *callback_data)
-{
-	FILE *f = (FILE*) callback_data;
-
-	if (complete == 0)
-		fprintf (stderr, "Error: incomplete frame received!\n");
-	return (fwrite (data, len, 1, f) < 1) ? -1 : 0;
-}
-
 static int read_frame (unsigned char *data, int n, unsigned int dropped, void *callback_data)
 {
 	FILE *f = (FILE*) callback_data;
@@ -55,34 +46,6 @@ static int read_frame (unsigned char *data, int n, unsigned int dropped, void *c
 static void sighandler (int sig)
 {
 	g_done = 1;
-}
-
-static void dv_receive( raw1394handle_t handle, FILE *f, int channel)
-{	
-	iec61883_dv_fb_t frame = iec61883_dv_fb_init (handle, write_frame, (void *)f );
-		
-	if (frame && iec61883_dv_fb_start (frame, channel) == 0)
-	{
-		struct pollfd pfd = {
-			fd: raw1394_get_fd (handle),
-			events: POLLIN | POLLPRI,
-			revents: 0
-		};
-		int result = 0;
-		
-		signal (SIGINT, sighandler);
-		signal (SIGPIPE, sighandler);
-		fprintf (stderr, "Starting to receive\n");
-
-		do {
-			if (poll (&pfd, 1, 100) > 0 && (pfd.revents & POLLIN))
-				result = raw1394_loop_iterate (handle);
-			
-		} while (g_done == 0 && result == 0);
-		
-		fprintf (stderr, "done.\n");
-	}
-	iec61883_dv_fb_close (frame);
 }
 
 static void dv_transmit( raw1394handle_t handle, FILE *f, int channel)
@@ -125,7 +88,6 @@ int main (int argc, char *argv[])
 	raw1394handle_t handle = raw1394_new_handle_on_port (0);
 	nodeid_t node = 0xffc0;
 	FILE *f = NULL;
-	int is_transmit = 0;
 	int node_specified = 0;
 	int i;
 	int channel;
@@ -139,76 +101,41 @@ int main (int argc, char *argv[])
 			fprintf (stderr, 
 			"usage: %s [[-r | -t] node-id] [- | file]\n"
 			"       Use - to transmit raw DV from stdin, or\n"
-			"       supply a filename to to transmit from a raw DV file.\n"
-			"       Otherwise, capture raw DV to stdout.\n", argv[0]);
+			"       supply a filename to to transmit from a raw DV file.\n", argv[0]);
 			raw1394_destroy_handle (handle);
 			return 1;
 		} else if (strncmp (argv[i], "-t", 2) == 0) {
 			node |= atoi (argv[++i]);
-			is_transmit = 1;
-			node_specified = 1;
-		} else if (strncmp (argv[i], "-r", 2) == 0) {
-			node |= atoi (argv[++i]);
-			is_transmit = 0;
 			node_specified = 1;
 		} else if (strcmp (argv[i], "-") != 0) {
-			if (node_specified && !is_transmit)
-				f = fopen (argv[i], "wb");
-			else {
-				f = fopen (argv[i], "rb");
-				is_transmit = 1;
-			}
-		} else if (!node_specified) {
-			is_transmit = 1;
+			f = fopen (argv[i], "rb");
 		}
 	}
 		
 	if (handle) {
 		int oplug = -1, iplug = -1;
 		
-		if (is_transmit) {
-			if (f == NULL)
-				f = stdin;
-			if (node_specified) {
-				channel = iec61883_cmp_connect (handle,
-					raw1394_get_local_id (handle), &oplug, node, &iplug,
-					&bandwidth);
-				if (channel > -1) {
-					fprintf (stderr, "Connect succeeded, transmitting on channel %d.\n", channel);
-					dv_transmit (handle, f, channel);
-					iec61883_cmp_disconnect (handle,
-						raw1394_get_local_id (handle), oplug, node, iplug,
-						channel, bandwidth);
-				} else {
-					fprintf (stderr, "Connect failed, reverting to broadcast channel 63.\n");
-					dv_transmit (handle, f, 63);
-				}
+		if (f == NULL)
+			f = stdin;
+		if (node_specified) {
+			channel = iec61883_cmp_connect (handle,
+				raw1394_get_local_id (handle), &oplug, node, &iplug,
+				&bandwidth);
+			if (channel > -1) {
+				fprintf (stderr, "Connect succeeded, transmitting on channel %d.\n", channel);
+				dv_transmit (handle, f, channel);
+				iec61883_cmp_disconnect (handle,
+					raw1394_get_local_id (handle), oplug, node, iplug,
+					channel, bandwidth);
 			} else {
+				fprintf (stderr, "Connect failed, reverting to broadcast channel 63.\n");
 				dv_transmit (handle, f, 63);
 			}
-			if (f != stdin)
-				fclose (f);
 		} else {
-			if (f == NULL)
-				f = stdout;
-			if (node_specified) {
-				channel = iec61883_cmp_connect (handle, node, &oplug, 
-					raw1394_get_local_id (handle), &iplug, &bandwidth);
-				if (channel > -1) {
-					dv_receive (handle, f, channel);
-					iec61883_cmp_disconnect (handle, node, oplug, 
-						raw1394_get_local_id (handle), iplug,
-						channel, bandwidth);
-				} else {
-					fprintf (stderr, "Connect failed, reverting to broadcast channel 63.\n");
-					dv_receive (handle, f, 63);
-				}
-			} else {
-				dv_receive (handle, f, 63);
-			}
-			if (f != stdout)
-				fclose (f);
+			dv_transmit (handle, f, 63);
 		}
+		if (f != stdin)
+			fclose (f);
 		raw1394_destroy_handle (handle);
 	} else {
 		fprintf (stderr, "Failed to get libraw1394 handle\n");
