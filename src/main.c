@@ -52,44 +52,59 @@ void seekFrame(FILE* file, int diff)
 //TODO: this is not reading a full frame, but likely 6 DIF blocks
 static int readFrame(unsigned char *data, int n, unsigned int dropped, void *callback_data)
 {
-    FILE* f = (FILE*) callback_data;
+    FILE* file = (FILE*) callback_data;
 
-    if(n == 1)
+    if(n != 1)
     {
-        if(fread(data, PACKET_SIZE, 1, f) < 1)
-        {
-            return -1;
-        }
-        else
-        {
-            currentDIFBlocks++;
-            if(currentDIFBlocks == 150 * 2)
-            {
-                currentDIFBlocks = 0;
+        return 0;
+    }
 
-                if(isPaused)
-                {
-                    currentFrame++;
-                    //This will read the same bit over and over, thus "pausing" the video
-                    seekFrame(f, -1);
-                }
-                else
-                {
-                    currentFrame++;
-                }
+    if(fread(data, PACKET_SIZE, 1, file) == 1)
+    {
+        currentDIFBlocks++;
+        if(currentDIFBlocks == 150 * 2)
+        {
+            currentDIFBlocks = 0;
+
+            if(isPaused)
+            {
+                currentFrame++;
+                //This will read the same bit over and over, thus "pausing" the video
+                seekFrame(file, -1);
             }
-            return 0;
+            else
+            {
+                currentFrame++;
+            }
         }
+        return 0;
     }
     else
     {
-        return 0;
+        return -1;
     }
 }
 
 static void sighandler(int sig)
 {
     interrupted = true;
+}
+
+void handleInput(FILE* file)
+{
+    char c = getch();
+    if(c == 'p')
+    {
+        isPaused = !isPaused;
+    }
+    else if(c == 'f')
+    {
+        seekFrame(file, 50);
+    }
+    else if(c == 'r')
+    {
+        seekFrame(file, -50);
+    }
 }
 
 void drawNcursesUI()
@@ -104,14 +119,14 @@ void drawNcursesUI()
     mvaddstr(8, 1, "P - Play/Pause   F - Forward 1s   R - Rewind 1s");
 }
 
-static void dv_transmit(raw1394handle_t handle, FILE* f, int channel)
+static void dv_transmit(raw1394handle_t handle, FILE* file, int channel)
 {	
     unsigned char data[PACKET_SIZE];
-    fread(data, PACKET_SIZE, 1, f);
+    fread(data, PACKET_SIZE, 1, file);
 
     int isPAL = (data[3] & 0x80) != 0;
 
-    iec61883_dv_t dv = iec61883_dv_xmit_init(handle, isPAL, readFrame, (void *)f);
+    iec61883_dv_t dv = iec61883_dv_xmit_init(handle, isPAL, readFrame, (void*) file);
     if(dv == NULL)
     {
         return;
@@ -140,21 +155,7 @@ static void dv_transmit(raw1394handle_t handle, FILE* f, int channel)
         if((r = poll(&pfd, 1, 100)) > 0 && (pfd.revents & POLLIN))
         {
             result = raw1394_loop_iterate(handle);
-            //Handle input
-            char c = getch();
-            if(c == 'p')
-            {
-                isPaused = !isPaused;
-            }
-            else if(c == 'f')
-            {
-                seekFrame(f, 50);
-            }
-            else if(c == 'r')
-            {
-                seekFrame(f, -50);
-            }
-            //Draw UI
+            handleInput(file);
             drawNcursesUI();
         }
         
