@@ -28,25 +28,33 @@
 
 #include <stdbool.h>
 
-#define PACKET_SIZE 480
+#define DIF_BLOCK_SIZE 80
+#define DIF_BLOCKS_PER_SEQUENCE 150
+#define SEQUENCES_PER_FRAME_PAL  12
+#define SEQUENCES_PER_FRAME_NTSC 10
+
+#define PACKET_SIZE DIF_BLOCK_SIZE * 6
 
 const char* fileName = NULL;
 
 static bool interrupted = false;
 
 static bool isPaused = false;
+static bool seekRequested = 0;
+static int seekDiff = 0;
 
 static int currentDIFBlocks = 0;
 static int currentFrame = 0;
 
-//TODO: this currently causes artifacts since we're cutting off in the middle of a block
+//TODO: use a buffer to store a single full frame in to make pausing easier (meaning we don't have to keep reading the same frame from disk)
+
 void seekFrame(FILE* file, int diff)
 {
     if(currentFrame + diff > 0)
     {
         currentFrame += diff;
     }
-    fseek(file, diff * 150 * 2 * PACKET_SIZE, SEEK_CUR);
+    fseek(file, diff * DIF_BLOCKS_PER_SEQUENCE * 2 * PACKET_SIZE, SEEK_CUR);
 }
 
 //TODO: this is not reading a full frame, but likely 6 DIF blocks
@@ -61,20 +69,33 @@ static int readFrame(unsigned char *data, int n, unsigned int dropped, void *cal
 
     if(fread(data, PACKET_SIZE, 1, file) == 1)
     {
+        //TODO: zeroing out the audio blocks seems to break things later down the line...
+        if(isPaused)
+        {
+            for(int i = 0; i < 6; i++)
+            {
+                if((data[i * DIF_BLOCK_SIZE] >> 5) == 3 && data[i * DIF_BLOCK_SIZE + 2] < 9)
+                {
+                    memset(data + i * DIF_BLOCK_SIZE + 3, 0, DIF_BLOCK_SIZE - 3);
+                }
+            }
+        }
+
         currentDIFBlocks++;
-        if(currentDIFBlocks == 150 * 2)
+        if(currentDIFBlocks == DIF_BLOCKS_PER_SEQUENCE * 2)
         {
             currentDIFBlocks = 0;
+            currentFrame++;
 
             if(isPaused)
             {
-                currentFrame++;
                 //This will read the same bit over and over, thus "pausing" the video
                 seekFrame(file, -1);
             }
-            else
+            else if(seekRequested)
             {
-                currentFrame++;
+                seekFrame(file, seekDiff);
+                seekRequested = false;
             }
         }
         return 0;
@@ -99,11 +120,13 @@ void handleInput(FILE* file)
     }
     else if(c == 'f')
     {
-        seekFrame(file, 50);
+        seekRequested = true;
+        seekDiff = 50;
     }
     else if(c == 'r')
     {
-        seekFrame(file, -50);
+        seekRequested = true;
+        seekDiff = -50;
     }
 }
 
@@ -116,7 +139,7 @@ void drawNcursesUI()
     mvaddstr(1, 1, buffer);
     sprintf(buffer, "Current frame: %5d Paused: %3s", currentFrame, isPaused ? "Yes" : "No");
     mvaddstr(2, 1, buffer);
-    mvaddstr(8, 1, "P - Play/Pause   F - Forward 1s   R - Rewind 1s");
+    mvaddstr(8, 1, "P - Play/Pause   F - Forward 1s   R - Rewind 1s   Ctrl+C - Quit");
 }
 
 static void dv_transmit(raw1394handle_t handle, FILE* file, int channel)
