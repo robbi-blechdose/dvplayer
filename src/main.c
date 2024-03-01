@@ -28,14 +28,13 @@
 
 #include <stdbool.h>
 
+#include "dv.h"
+
+//TODO: ntsc support?
+
 #define NUM_FRAMES_FFRW 50
 
-#define DIF_BLOCK_SIZE 80
-#define DIF_BLOCKS_PER_SEQUENCE 150
-#define SEQUENCES_PER_FRAME_PAL  12
-#define SEQUENCES_PER_FRAME_NTSC 10
-
-#define PACKET_SIZE DIF_BLOCK_SIZE * 6
+#define PACKET_SIZE (DV_DIF_BLOCK_SIZE * 6)
 
 const char* fileName = NULL;
 bool uiEnabled = true;
@@ -48,10 +47,12 @@ bool pauseChangeRequested = false;
 bool pauseRequested = false;
 bool isPaused = false;
 
-static int currentPackets = 0;
-static int currentFrame = 0;
+int currentPackets = 0;
+int currentFrame = 0;
 
-//TODO: use a buffer to store a single full frame in to make pausing easier (meaning we don't have to keep reading the same frame from disk)
+char timecodeBuffer[64];
+
+unsigned char dvFrame[DV_FRAME_SIZE_PAL];
 
 void seekFrame(FILE* file, int diff)
 {
@@ -59,28 +60,32 @@ void seekFrame(FILE* file, int diff)
     {
         currentFrame += diff;
     }
-    fseek(file, diff * DIF_BLOCKS_PER_SEQUENCE * 2 * PACKET_SIZE, SEEK_CUR);
+    fseek(file, diff * DV_FRAME_SIZE_PAL, SEEK_CUR);
 }
 
-void handlePacketCounters(FILE* file, unsigned char* data)
+static int readPacket(unsigned char* data, int n, unsigned int dropped, void* callback_data)
 {
-    //TODO: zeroing out the audio blocks seems to break things later down the line...
-    if(isPaused)
+    FILE* file = (FILE*) callback_data;
+
+    if(n != 1)
     {
-        for(int i = 0; i < 6; i++)
-        {
-            if((data[i * DIF_BLOCK_SIZE] >> 5) == 3 && data[i * DIF_BLOCK_SIZE + 2] < 9)
-            {
-                memset(data + i * DIF_BLOCK_SIZE + 3, 0, DIF_BLOCK_SIZE - 3);
-            }
-        }
+        return 0;
     }
 
     currentPackets++;
-    if(currentPackets == DIF_BLOCKS_PER_SEQUENCE * 2)
+    if(currentPackets == DV_DIF_BLOCKS_PER_SEQUENCE * 2)
     {
         currentPackets = 0;
         currentFrame++;
+
+        //Read new frame
+        if(fread(dvFrame, DV_FRAME_SIZE_PAL, 1, file) != 1)
+        {
+            return -1;
+        }
+
+        //Per-frame handling
+        dvGetTimecode(dvFrame, timecodeBuffer);
 
         if(isPaused)
         {
@@ -99,26 +104,9 @@ void handlePacketCounters(FILE* file, unsigned char* data)
             seekRequested = false;
         }
     }
-}
 
-static int readPacket(unsigned char* data, int n, unsigned int dropped, void* callback_data)
-{
-    FILE* file = (FILE*) callback_data;
-
-    if(n != 1)
-    {
-        return 0;
-    }
-
-    if(fread(data, PACKET_SIZE, 1, file) == 1)
-    {
-        handlePacketCounters(file, data);
-        return 0;
-    }
-    else
-    {
-        return -1;
-    }
+    memcpy(data, dvFrame + currentPackets * PACKET_SIZE, PACKET_SIZE);
+    return 0;
 }
 
 static void sighandler(int sig)
@@ -148,14 +136,14 @@ void handleInput(FILE* file)
 
 void drawNcursesUI(bool isPAL)
 {
-    char buffer[80];
+    char buffer[128];
     box(stdscr, 0, 0);
     mvaddstr(0, 8, "dvplayer");
     sprintf(buffer, "File: %s", fileName == NULL ? "stdin" : fileName);
     mvaddstr(1, 1, buffer);
-    sprintf(buffer, "Format: %s", isPAL ? "PAL" : "NTSC");
+    sprintf(buffer, "Format: %4s", isPAL ? "PAL" : "NTSC");
     mvaddstr(2, 1, buffer);
-    sprintf(buffer, "Current frame: %5d Paused: %3s", currentFrame, isPaused ? "Yes" : "No");
+    sprintf(buffer, "Timecode: %s   Frame: %5d Paused: %3s", timecodeBuffer, currentFrame, isPaused ? "Yes" : "No");
     mvaddstr(3, 1, buffer);
     mvaddstr(8, 1, "P - Play/Pause   F - Forward 1s   R - Rewind 1s   Ctrl+C - Quit");
 }

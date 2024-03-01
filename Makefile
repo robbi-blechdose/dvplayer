@@ -18,5 +18,6 @@ $(PNAME): $(OBJS)
 $(OBJS): %.o : %.c
 	$(CC) $(CFLAGS) $(INCLUDES) -c -o $@ $<
 
-oclean:
+clean:
 	rm *.o
+	rm $(PNAME)
