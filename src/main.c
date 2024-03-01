@@ -42,17 +42,19 @@ bool uiEnabled = true;
 static bool interrupted = false;
 
 bool seekRequested = false;
-int seekDiff = 0;
+int seekRequestedDiff = 0;
+
 bool pauseChangeRequested = false;
 bool pauseRequested = false;
 bool isPaused = false;
 
+bool frameReloadRequested = false;
+
 int currentPackets = 0;
 int currentFrame = 0;
 
-char timecodeBuffer[64];
-
 unsigned char dvFrame[DV_FRAME_SIZE_PAL];
+char timecodeBuffer[64];
 
 void seekFrame(FILE* file, int diff)
 {
@@ -76,32 +78,39 @@ static int readPacket(unsigned char* data, int n, unsigned int dropped, void* ca
     if(currentPackets == DV_DIF_BLOCKS_PER_SEQUENCE * 2)
     {
         currentPackets = 0;
-        currentFrame++;
 
-        //Read new frame
-        if(fread(dvFrame, DV_FRAME_SIZE_PAL, 1, file) != 1)
+        //If we're paused, don't advance the frame counter and don't read a new frame
+        if(!isPaused || frameReloadRequested)
         {
-            return -1;
+            currentFrame++;
+            //This is used to reload the frame when seeking while paused, or when pausing
+            frameReloadRequested = false;
+
+            //Read new frame
+            if(fread(dvFrame, DV_FRAME_SIZE_PAL, 1, file) != 1)
+            {
+                return -1;
+            }
+
+            if(isPaused)
+            {
+                dv_removeAudio(dvFrame);
+            }
         }
 
-        //Per-frame handling
-        dvGetTimecode(dvFrame, timecodeBuffer);
-
-        if(isPaused)
-        {
-            //This will read the same bit over and over, thus "pausing" the video
-            seekFrame(file, -1);
-        }
+        dv_getTimecode(dvFrame, timecodeBuffer);
 
         if(pauseChangeRequested)
         {
             isPaused = pauseRequested;
             pauseChangeRequested = false;
+            frameReloadRequested = true;
         }
         else if(seekRequested)
         {
-            seekFrame(file, seekDiff);
+            seekFrame(file, seekRequestedDiff);
             seekRequested = false;
+            frameReloadRequested = true;
         }
     }
 
@@ -125,12 +134,12 @@ void handleInput(FILE* file)
     else if(c == 'f')
     {
         seekRequested = true;
-        seekDiff = NUM_FRAMES_FFRW;
+        seekRequestedDiff = NUM_FRAMES_FFRW;
     }
     else if(c == 'r')
     {
         seekRequested = true;
-        seekDiff = -NUM_FRAMES_FFRW;
+        seekRequestedDiff = -NUM_FRAMES_FFRW;
     }
 }
 
@@ -143,8 +152,10 @@ void drawNcursesUI(bool isPAL)
     mvaddstr(1, 1, buffer);
     sprintf(buffer, "Format: %4s", isPAL ? "PAL" : "NTSC");
     mvaddstr(2, 1, buffer);
-    sprintf(buffer, "Timecode: %s   Frame: %5d Paused: %3s", timecodeBuffer, currentFrame, isPaused ? "Yes" : "No");
+    sprintf(buffer, "Timecode: %s   Frame: %5d", timecodeBuffer, currentFrame);
     mvaddstr(3, 1, buffer);
+    sprintf(buffer, "Paused: %3s", isPaused ? "Yes" : "No");
+    mvaddstr(4, 1, buffer);
     mvaddstr(8, 1, "P - Play/Pause   F - Forward 1s   R - Rewind 1s   Ctrl+C - Quit");
 }
 

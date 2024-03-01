@@ -2,8 +2,9 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
-void dvGetTimecode(unsigned char* dvFrame, char* timecodeBuffer)
+void dv_getTimecode(unsigned char* dvFrame, char* timecodeBuffer)
 {
     for(int blockIndex = 0; blockIndex < DV_DIF_BLOCKS_PER_SEQUENCE * DV_SEQUENCES_PER_FRAME_PAL; blockIndex++)
     {
@@ -15,9 +16,9 @@ void dvGetTimecode(unsigned char* dvFrame, char* timecodeBuffer)
             continue;
         }
 
-        for(int ssybIndex = 0; ssybIndex < DV_SSYB_BLOCKS_PER_DIF_BLOCK; ssybIndex++)
+        for(int ssybIndex = 0; ssybIndex < DV_SSYB_PACKS_PER_DIF_BLOCK; ssybIndex++)
         {
-            int ssybOffset = blockOffset + 3 + ssybIndex * DV_SSYB_BLOCK_SIZE;
+            int ssybOffset = blockOffset + 3 + ssybIndex * DV_SSYB_PACK_SIZE;
 
             int ssybNumber = dvFrame[ssybOffset + 1] & 0x0F;
 
@@ -31,5 +32,22 @@ void dvGetTimecode(unsigned char* dvFrame, char* timecodeBuffer)
                 return;
             }
         }
+    }
+}
+
+void dv_removeAudio(unsigned char* dvFrame)
+{
+    for(int blockIndex = 0; blockIndex < DV_DIF_BLOCKS_PER_SEQUENCE * DV_SEQUENCES_PER_FRAME_PAL; blockIndex++)
+    {
+        int blockOffset = blockIndex * DV_DIF_BLOCK_SIZE;
+
+        int blockType = dvFrame[blockOffset] >> 5;
+        if(blockType != 3)
+        {
+            continue;
+        }
+
+        //Zero out audio data, leaving ID and audio auxiliary data intact
+        memset(dvFrame + blockOffset + 8, 0, DV_DIF_BLOCK_SIZE - 8);
     }
 }
