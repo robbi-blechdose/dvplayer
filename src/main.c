@@ -171,7 +171,7 @@ void drawNcursesUI(bool isPAL)
     mvaddstr(3, 1, buffer);
     sprintf(buffer, "Paused: %3s", isPaused ? "Yes" : "No");
     mvaddstr(4, 1, buffer);
-    mvaddstr(8, 1, "P - Play/Pause   F - Forward 1s   R - Rewind 1s   Left Arrow - Previous Frame   Right Arrow - Next Frame   Ctrl+C - Quit");
+    mvaddstr(8, 1, "P - Play/Pause   F - Forward 2s   R - Rewind 2s   Left Arrow - Previous Frame   Right Arrow - Next Frame   Ctrl+C - Quit");
 }
 
 static void transmitDV(raw1394handle_t handle, FILE* file, int channel)
