@@ -60,6 +60,9 @@ char timecodeBuffer[64];
 
 void seekFrame(FILE* file, int diff)
 {
+    //This accounts for the fact we're at the end of the currently displaying frame
+    //So if we want to go back one frame, we have to go to the beginning of the *previous* frame, meaning we seek back 2 frames in total
+    diff -= 1;
     if(currentFrame + diff > 0)
     {
         currentFrame += diff;
@@ -127,7 +130,7 @@ static void sighandler(int sig)
 
 void handleInput(FILE* file)
 {
-    char c = getch();
+    int c = getch();
     if(c == 'p')
     {
         pauseChangeRequested = true;
@@ -142,6 +145,16 @@ void handleInput(FILE* file)
     {
         seekRequested = true;
         seekRequestedDiff = -NUM_FRAMES_FFRW;
+    }
+    else if(c == KEY_RIGHT)
+    {
+        seekRequested = true;
+        seekRequestedDiff = 1;
+    }
+    else if(c == KEY_LEFT)
+    {
+        seekRequested = true;
+        seekRequestedDiff = -1;
     }
 }
 
@@ -158,7 +171,7 @@ void drawNcursesUI(bool isPAL)
     mvaddstr(3, 1, buffer);
     sprintf(buffer, "Paused: %3s", isPaused ? "Yes" : "No");
     mvaddstr(4, 1, buffer);
-    mvaddstr(8, 1, "P - Play/Pause   F - Forward 1s   R - Rewind 1s   Ctrl+C - Quit");
+    mvaddstr(8, 1, "P - Play/Pause   F - Forward 1s   R - Rewind 1s   Left Arrow - Previous Frame   Right Arrow - Next Frame   Ctrl+C - Quit");
 }
 
 static void transmitDV(raw1394handle_t handle, FILE* file, int channel)
