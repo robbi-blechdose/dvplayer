@@ -1,12 +1,13 @@
 #include "dv.h"
 
-#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
-void dv_getTimecode(unsigned char* dvFrame, char* timecodeBuffer)
+void dv_getTimecode(unsigned char* dvFrame, char* timecodeBuffer, bool isPAL)
 {
-    for(int blockIndex = 0; blockIndex < DV_DIF_BLOCKS_PER_SEQUENCE * DV_SEQUENCES_PER_FRAME_PAL; blockIndex++)
+    int sequencesPerFrame = isPAL ? DV_SEQUENCES_PER_FRAME_PAL : DV_SEQUENCES_PER_FRAME_NTSC;
+
+    for(int blockIndex = 0; blockIndex < DV_DIF_BLOCKS_PER_SEQUENCE * sequencesPerFrame; blockIndex++)
     {
         int blockOffset = blockIndex * DV_DIF_BLOCK_SIZE;
 
@@ -35,9 +36,11 @@ void dv_getTimecode(unsigned char* dvFrame, char* timecodeBuffer)
     }
 }
 
-void dv_removeAudio(unsigned char* dvFrame)
+void dv_removeAudio(unsigned char* dvFrame, bool isPAL)
 {
-    for(int blockIndex = 0; blockIndex < DV_DIF_BLOCKS_PER_SEQUENCE * DV_SEQUENCES_PER_FRAME_PAL; blockIndex++)
+    int sequencesPerFrame = isPAL ? DV_SEQUENCES_PER_FRAME_PAL : DV_SEQUENCES_PER_FRAME_NTSC;
+
+    for(int blockIndex = 0; blockIndex < DV_DIF_BLOCKS_PER_SEQUENCE * sequencesPerFrame; blockIndex++)
     {
         int blockOffset = blockIndex * DV_DIF_BLOCK_SIZE;
 

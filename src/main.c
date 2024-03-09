@@ -27,12 +27,9 @@
 #include <signal.h>
 #include <string.h>
 #include <stdlib.h>
-
 #include <stdbool.h>
 
 #include "dv.h"
-
-//TODO: ntsc support?
 
 #define NUM_FRAMES_FFRW 50
 
@@ -55,7 +52,10 @@ bool frameReloadRequested = false;
 int currentPackets = 0;
 int currentFrame = 0;
 
+//Since PAL frames are bigger, we can simply always allocate for them and save ourselves a dynamic allocation
 unsigned char dvFrame[DV_FRAME_SIZE_PAL];
+bool isPAL;
+
 char timecodeBuffer[64];
 
 void seekFrame(FILE* file, int diff)
@@ -67,7 +67,7 @@ void seekFrame(FILE* file, int diff)
     {
         currentFrame += diff;
     }
-    fseek(file, diff * DV_FRAME_SIZE_PAL, SEEK_CUR);
+    fseek(file, diff * (isPAL ? DV_FRAME_SIZE_PAL : DV_FRAME_SIZE_NTSC), SEEK_CUR);
 }
 
 static int readPacket(unsigned char* data, int n, unsigned int dropped, void* callback_data)
@@ -80,7 +80,8 @@ static int readPacket(unsigned char* data, int n, unsigned int dropped, void* ca
     }
 
     currentPackets++;
-    if(currentPackets == DV_DIF_BLOCKS_PER_SEQUENCE * 2)
+    if((isPAL && currentPackets * PACKET_SIZE == DV_FRAME_SIZE_PAL) ||
+        (!isPAL && currentPackets * PACKET_SIZE == DV_FRAME_SIZE_NTSC))
     {
         currentPackets = 0;
 
@@ -92,18 +93,18 @@ static int readPacket(unsigned char* data, int n, unsigned int dropped, void* ca
             frameReloadRequested = false;
 
             //Read new frame
-            if(fread(dvFrame, DV_FRAME_SIZE_PAL, 1, file) != 1)
+            if(fread(dvFrame, isPAL ? DV_FRAME_SIZE_PAL : DV_FRAME_SIZE_NTSC, 1, file) != 1)
             {
                 return -1;
             }
 
             if(isPaused)
             {
-                dv_removeAudio(dvFrame);
+                dv_removeAudio(dvFrame, isPAL);
             }
         }
 
-        dv_getTimecode(dvFrame, timecodeBuffer);
+        dv_getTimecode(dvFrame, timecodeBuffer, isPAL);
 
         if(pauseChangeRequested)
         {
@@ -158,7 +159,7 @@ void handleInput(FILE* file)
     }
 }
 
-void drawNcursesUI(bool isPAL)
+void drawNcursesUI()
 {
     char buffer[128];
     box(stdscr, 0, 0);
@@ -175,11 +176,10 @@ void drawNcursesUI(bool isPAL)
 }
 
 static void transmitDV(raw1394handle_t handle, FILE* file, int channel)
-{	
+{
     unsigned char data[PACKET_SIZE];
     fread(data, PACKET_SIZE, 1, file);
-
-    int isPAL = (data[3] & 0x80) != 0;
+    isPAL = (data[3] & 0x80) != 0;
 
     iec61883_dv_t dv = iec61883_dv_xmit_init(handle, isPAL, readPacket, (void*) file);
     if(dv == NULL)
@@ -193,18 +193,19 @@ static void transmitDV(raw1394handle_t handle, FILE* file, int channel)
         return;
     }
     
+    signal(SIGINT, sighandler);
+    signal(SIGPIPE, sighandler);
+
+    if(!uiEnabled)
+    {
+        printf("Starting to transmit %s.\n", isPAL ? "PAL" : "NTSC");
+    }
+    
     struct pollfd pfd = {
         fd: raw1394_get_fd(handle),
         events: POLLIN,
         revents: 0
     };
-    
-    signal(SIGINT, sighandler);
-    signal(SIGPIPE, sighandler);
-    if(!uiEnabled)
-    {
-        printf("Starting to transmit %s.\n", isPAL ? "PAL" : "NTSC");
-    }
 
     int result = 0;
     do
@@ -216,7 +217,7 @@ static void transmitDV(raw1394handle_t handle, FILE* file, int channel)
             if(uiEnabled)
             {
                 handleInput(file);
-                drawNcursesUI(isPAL);
+                drawNcursesUI();
             }
         }
         
