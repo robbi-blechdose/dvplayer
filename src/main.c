@@ -129,8 +129,14 @@ static void sighandler(int sig)
     interrupted = true;
 }
 
-void handleInput(FILE* file)
+void handleInput()
 {
+    if(fileName == NULL)
+    {
+        //Input is disabled if we're reading from stdin, since we can't seek in a pipe
+        return;
+    }
+
     int c = getch();
     if(c == 'p')
     {
@@ -170,9 +176,20 @@ void drawNcursesUI()
     mvaddstr(2, 1, buffer);
     sprintf(buffer, "Timecode: %s   Frame: %5d", timecodeBuffer, currentFrame);
     mvaddstr(3, 1, buffer);
-    sprintf(buffer, "Paused: %3s", isPaused ? "Yes" : "No");
-    mvaddstr(4, 1, buffer);
-    mvaddstr(8, 1, "P - Play/Pause   F - Forward 2s   R - Rewind 2s   Left Arrow - Previous Frame   Right Arrow - Next Frame   Ctrl+C - Quit");
+    if(fileName != NULL)
+    {
+        sprintf(buffer, "Paused: %3s", isPaused ? "Yes" : "No");
+        mvaddstr(4, 1, buffer);
+        mvaddstr(8, 1, "P - Play/Pause   F - Forward 2s   R - Rewind 2s   Left Arrow - Previous Frame   Right Arrow - Next Frame   Ctrl+C - Quit");
+    }
+    else
+    {
+        attron(A_BOLD);
+        mvaddstr(5, 1, "Navigation is disabled for piped input.");
+        attroff(A_BOLD);
+        mvaddstr(8, 1, "Ctrl+C - Quit");
+    }
+    refresh();
 }
 
 static void transmitDV(raw1394handle_t handle, FILE* file, int channel)
@@ -216,7 +233,7 @@ static void transmitDV(raw1394handle_t handle, FILE* file, int channel)
             result = raw1394_loop_iterate(handle);
             if(uiEnabled)
             {
-                handleInput(file);
+                handleInput();
                 drawNcursesUI();
             }
         }
