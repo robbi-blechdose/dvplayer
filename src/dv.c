@@ -3,6 +3,13 @@
 #include <stdio.h>
 #include <string.h>
 
+typedef enum {
+    DIFT_HEADER  = 0b000,
+    DIFT_SUBCODE = 0b001,
+    DIFT_VAUX    = 0b010,
+    DIFT_AUDIO   = 0b011
+} DIFBlockType;
+
 void dv_getTimecode(unsigned char* dvFrame, char* timecodeBuffer, bool isPAL)
 {
     int sequencesPerFrame = isPAL ? DV_SEQUENCES_PER_FRAME_PAL : DV_SEQUENCES_PER_FRAME_NTSC;
@@ -11,8 +18,8 @@ void dv_getTimecode(unsigned char* dvFrame, char* timecodeBuffer, bool isPAL)
     {
         int blockOffset = blockIndex * DV_DIF_BLOCK_SIZE;
 
-        int blockType = dvFrame[blockOffset] >> 5;
-        if(blockType != 1)
+        DIFBlockType blockType = dvFrame[blockOffset] >> 5;
+        if(blockType != DIFT_SUBCODE)
         {
             continue;
         }
@@ -44,8 +51,8 @@ void dv_removeAudio(unsigned char* dvFrame, bool isPAL)
     {
         int blockOffset = blockIndex * DV_DIF_BLOCK_SIZE;
 
-        int blockType = dvFrame[blockOffset] >> 5;
-        if(blockType != 3)
+        DIFBlockType blockType = dvFrame[blockOffset] >> 5;
+        if(blockType != DIFT_AUDIO)
         {
             continue;
         }
