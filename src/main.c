@@ -300,11 +300,6 @@ int main(int argc, char* argv[])
     
     int oplug = -1, iplug = -1;
     
-    if(inputFile == NULL)
-    {
-        inputFile = stdin;
-    }
-
     if(uiEnabled)
     {
         //Set up ncurses
@@ -315,6 +310,20 @@ int main(int argc, char* argv[])
         timeout(0);
     }
     
+    if(inputFile == NULL)
+    {
+        inputFile = stdin;
+        if(uiEnabled)
+        {
+            //Draw once so the UI shows even if we're waiting on input
+            drawNcursesUI();
+        }
+        else
+        {
+            printf("Reading from stdin.\n");
+        }
+    }
+
     if(nodeSpecified)
     {
         channel = iec61883_cmp_connect(handle, raw1394_get_local_id(handle), &oplug, node, &iplug, &bandwidth);
