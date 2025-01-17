@@ -260,6 +260,7 @@ int main(int argc, char* argv[])
     bool nodeSpecified = false;
 
     FILE* inputFile = NULL;
+    bool inputSpecified = false;
 
     for(int i = 1; i < argc; i++)
     {
@@ -274,14 +275,37 @@ int main(int argc, char* argv[])
         }
         else if(strncmp(argv[i], "-t", 2) == 0)
         {
-            node |= atoi(argv[++i]);
-            nodeSpecified = true;
+            if(i + 1 < argc)
+            {
+                node |= atoi(argv[++i]);
+                nodeSpecified = true;
+            }
+            else
+            {
+                printf("Missing node ID for -t argument, exiting.\n");
+                return -1;
+            }
         }
-        else if(strcmp(argv[i], "-") != 0)
+        else if(i < argc -1)
         {
-            inputFile = fopen(argv[i], "rb");
-            fileName = argv[i];
+            printf("Unknown argument, exiting.\n");
+            return -1;
         }
+        else
+        {
+            if(strcmp(argv[argc - 1], "-") != 0)
+            {
+                inputFile = fopen(argv[i], "rb");
+                fileName = argv[i];
+            }
+            inputSpecified = true;
+        }
+    }
+
+    if(!inputSpecified)
+    {
+        printf("No input file specified, exiting.\n");
+        return -1;
     }
 
     raw1394handle_t handle = raw1394_new_handle_on_port(0);
@@ -310,6 +334,7 @@ int main(int argc, char* argv[])
         timeout(0);
     }
     
+    //Last argument is the input file
     if(inputFile == NULL)
     {
         inputFile = stdin;
@@ -323,7 +348,6 @@ int main(int argc, char* argv[])
             printf("Reading from stdin.\n");
         }
     }
-
     if(nodeSpecified)
     {
         channel = iec61883_cmp_connect(handle, raw1394_get_local_id(handle), &oplug, node, &iplug, &bandwidth);
